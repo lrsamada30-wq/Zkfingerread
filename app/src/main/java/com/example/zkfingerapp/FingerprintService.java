@@ -1,9 +1,6 @@
 package com.example.zkfingerapp;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.util.Log;
@@ -99,32 +96,45 @@ public class FingerprintService {
     }
     
     public void loadAllFingerprintsToCache(final LoadCallback callback) {
-        new Thread(() -> {
-            try {
-                ZKFingerService.clear();
-                
-                List<FingerprintEntity> fingerprints = database.fingerprintDao().getAll();
-                Log.d(TAG, "Cargando " + fingerprints.size() + " huellas a la caché");
-                
-                int successCount = 0;
-                for (FingerprintEntity fp : fingerprints) {
-                    int result = ZKFingerService.save(fp.getTemplateData(), fp.getUserId());
-                    if (result == 0) {
-                        successCount++;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ZKFingerService.clear();
+                    
+                    List<FingerprintEntity> fingerprints = database.fingerprintDao().getAll();
+                    Log.d(TAG, "Cargando " + fingerprints.size() + " huellas a la caché");
+                    
+                    int successCount = 0;
+                    for (FingerprintEntity fp : fingerprints) {
+                        int result = ZKFingerService.save(fp.getTemplateData(), fp.getUserId());
+                        if (result == 0) {
+                            successCount++;
+                        }
                     }
-                }
-                
-                final int count = ZKFingerService.count();
-                if (callback != null) {
-                    ((android.app.Activity) context).runOnUiThread(() -> 
-                        callback.onLoaded(successCount, count));
-                }
-                
-            } catch (Exception e) {
-                Log.e(TAG, "Error cargando huellas: " + e.getMessage());
-                if (callback != null) {
-                    ((android.app.Activity) context).runOnUiThread(() -> 
-                        callback.onError(e.getMessage()));
+                    
+                    final int finalSuccessCount = successCount;
+                    final int finalCount = ZKFingerService.count();
+                    
+                    if (callback != null) {
+                        ((android.app.Activity) context).runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                callback.onLoaded(finalSuccessCount, finalCount);
+                            }
+                        });
+                    }
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "Error cargando huellas: " + e.getMessage());
+                    if (callback != null) {
+                        ((android.app.Activity) context).runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                callback.onError(e.getMessage());
+                            }
+                        });
+                    }
                 }
             }
         }).start();
@@ -242,16 +252,19 @@ public class FingerprintService {
     }
     
     private void saveFingerprintToDatabase(String userId, byte[] template) {
-        new Thread(() -> {
-            try {
-                FingerprintEntity entity = new FingerprintEntity(userId, template, System.currentTimeMillis());
-                long id = database.fingerprintDao().insert(entity);
-                if (id > 0) {
-                    ZKFingerService.save(template, userId);
-                    Log.d(TAG, "Huella guardada: " + userId);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    FingerprintEntity entity = new FingerprintEntity(userId, template, System.currentTimeMillis());
+                    long id = database.fingerprintDao().insert(entity);
+                    if (id > 0) {
+                        ZKFingerService.save(template, userId);
+                        Log.d(TAG, "Huella guardada: " + userId);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error guardando: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error guardando: " + e.getMessage());
             }
         }).start();
     }
@@ -265,9 +278,12 @@ public class FingerprintService {
     }
     
     public void clearAllFingerprints() {
-        new Thread(() -> {
-            database.fingerprintDao().clearAll();
-            ZKFingerService.clear();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                database.fingerprintDao().clearAll();
+                ZKFingerService.clear();
+            }
         }).start();
     }
     
