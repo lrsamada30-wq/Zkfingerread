@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # Permite ejecución manual desde la web
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,35 +24,26 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        cmdline-tools-version: 9477386
+        packages: >
+          platforms;android-33
+          build-tools;33.0.0
     
-    - name: Accept Android SDK licenses
+    - name: Create local.properties
       run: |
-        yes | sdkmanager --licenses || true
-        sdkmanager "platforms;android-33" "build-tools;33.0.0"
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
     
-    - name: Grant execute permission for gradlew
+    - name: Make Gradlew executable
       run: chmod +x gradlew
     
     - name: Clean project
-      run: ./gradlew clean
+      run: ./gradlew clean --no-daemon
     
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --no-daemon --stacktrace
     
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       with:
         name: ZKFingerApp-Debug
         path: app/build/outputs/apk/debug/*.apk
-        retention-days: 30
-    
-    - name: Build Release APK (unsigned)
-      run: ./gradlew assembleRelease --stacktrace
-    
-    - name: Upload Release APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: ZKFingerApp-Release
-        path: app/build/outputs/apk/release/*.apk
         retention-days: 30
