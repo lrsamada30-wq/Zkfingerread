@@ -29,9 +29,7 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void initViews() {
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        
+              
         tvStatus = findViewById(R.id.tvStatus);
         tvCount = findViewById(R.id.tvCount);
         imageView = findViewById(R.id.imageView);
