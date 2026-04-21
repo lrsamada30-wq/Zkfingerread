@@ -1,22 +1,23 @@
 package com.example.zkfingerapp;
 
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.Toolbar;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 public class MainActivity extends AppCompatActivity {
     
     private FingerprintService fingerprintService;
-    private EditText etUserId;
     private TextView tvStatus, tvCount;
-    private Button btnRegister, btnVerify, btnLoadCache;
+    private ImageView imageView;
+    private Button btnStart, btnStop, btnRegister, btnVerify, btnClear;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,70 +32,86 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         
-        etUserId = findViewById(R.id.etUserId);
         tvStatus = findViewById(R.id.tvStatus);
         tvCount = findViewById(R.id.tvCount);
+        imageView = findViewById(R.id.imageView);
+        btnStart = findViewById(R.id.btnStart);
+        btnStop = findViewById(R.id.btnStop);
         btnRegister = findViewById(R.id.btnRegister);
         btnVerify = findViewById(R.id.btnVerify);
-        btnLoadCache = findViewById(R.id.btnLoadCache);
+        btnClear = findViewById(R.id.btnClear);
         
         FloatingActionButton fab = findViewById(R.id.fab);
         fab.setOnClickListener(v -> showInfoDialog());
         
+        btnStart.setOnClickListener(v -> startCapture());
+        btnStop.setOnClickListener(v -> stopCapture());
         btnRegister.setOnClickListener(v -> startRegistration());
         btnVerify.setOnClickListener(v -> startVerification());
-        btnLoadCache.setOnClickListener(v -> loadCacheFromDatabase());
+        btnClear.setOnClickListener(v -> clearDatabase());
     }
     
     private void initFingerprintService() {
         fingerprintService = new FingerprintService(this);
-        fingerprintService.openSensor();
+        boolean opened = fingerprintService.openSensor();
         
-        // Cargar huellas automáticamente al iniciar
-        loadCacheFromDatabase();
-    }
-    
-    private void loadCacheFromDatabase() {
-        tvStatus.setText("Cargando huellas...");
-        fingerprintService.loadAllFingerprintsToCache();
-        
-        // Mostrar cantidad después de cargar
-        new android.os.Handler().postDelayed(() -> {
-            int count = fingerprintService.getFingerprintCount();
-            tvCount.setText("Huellas en caché: " + count);
-            tvStatus.setText("Listo para usar");
-        }, 1000);
-    }
-    
-    private void startRegistration() {
-        String userId = etUserId.getText().toString().trim();
-        if (userId.isEmpty()) {
-            Toast.makeText(this, "Ingrese un ID de usuario", Toast.LENGTH_SHORT).show();
-            return;
+        if (opened) {
+            tvStatus.setText("Sensor abierto. Presione 'Iniciar Captura'");
+        } else {
+            tvStatus.setText("Error al abrir sensor. Verifique conexión USB");
         }
         
-        tvStatus.setText("Registrando - Presione el dedo 3 veces");
-        btnRegister.setEnabled(false);
-        btnVerify.setEnabled(false);
-        
-        fingerprintService.registerFingerprint(userId, new FingerprintService.RegisterCallback() {
+        // Cargar huellas existentes
+        fingerprintService.loadAllFingerprintsToCache(new FingerprintService.LoadCallback() {
             @Override
-            public void onProgress(int remaining) {
+            public void onLoaded(int loaded, int total) {
                 runOnUiThread(() -> {
-                    tvStatus.setText("Registrando - Faltan " + remaining + " capturas");
+                    tvCount.setText("Huellas en caché: " + total);
+                    tvStatus.setText("Listo. " + loaded + " huellas cargadas");
                 });
             }
             
             @Override
-            public void onSuccess() {
+            public void onError(String error) {
+                runOnUiThread(() -> tvStatus.setText("Error carga: " + error));
+            }
+        });
+    }
+    
+    private void startCapture() {
+        boolean started = fingerprintService.startCapture();
+        if (started) {
+            tvStatus.setText("Capturando... Coloque su dedo");
+            btnStart.setEnabled(false);
+            btnStop.setEnabled(true);
+        } else {
+            Toast.makeText(this, "Error al iniciar captura", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void stopCapture() {
+        fingerprintService.stopCapture();
+        tvStatus.setText("Captura detenida");
+        btnStart.setEnabled(true);
+        btnStop.setEnabled(false);
+    }
+    
+    private void startRegistration() {
+        tvStatus.setText("Registrando - Presione el dedo 3 veces");
+        
+        fingerprintService.registerFingerprint(new FingerprintService.RegisterCallback() {
+            @Override
+            public void onProgress(int remaining) {
+                runOnUiThread(() -> tvStatus.setText("Registro - Faltan " + remaining + " capturas"));
+            }
+            
+            @Override
+            public void onSuccess(String userId) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Huella registrada exitosamente", Toast.LENGTH_SHORT).show();
-                    tvStatus.setText("Registro completado");
-                    etUserId.setText("");
+                    Toast.makeText(MainActivity.this, "Huella registrada: " + userId, Toast.LENGTH_SHORT).show();
+                    tvStatus.setText("Registro exitoso: " + userId);
                     int count = fingerprintService.getFingerprintCount();
                     tvCount.setText("Huellas en caché: " + count);
-                    btnRegister.setEnabled(true);
-                    btnVerify.setEnabled(true);
                 });
             }
             
@@ -102,9 +119,7 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String error) {
                 runOnUiThread(() -> {
                     Toast.makeText(MainActivity.this, "Error: " + error, Toast.LENGTH_LONG).show();
-                    tvStatus.setText("Error en registro");
-                    btnRegister.setEnabled(true);
-                    btnVerify.setEnabled(true);
+                    tvStatus.setText("Error: " + error);
                 });
             }
         });
@@ -112,22 +127,18 @@ public class MainActivity extends AppCompatActivity {
     
     private void startVerification() {
         tvStatus.setText("Verificando - Presione el dedo");
-        btnRegister.setEnabled(false);
-        btnVerify.setEnabled(false);
         
         fingerprintService.verifyFingerprint(new FingerprintService.VerifyCallback() {
             @Override
-            public void onVerified(boolean success, String userId, int score) {
+            public void onVerified(boolean success, String userId, int score, long elapsedMicros) {
                 runOnUiThread(() -> {
                     if (success) {
-                        tvStatus.setText("✅ Verificado! Usuario: " + userId + " (Score: " + score + ")");
-                        Toast.makeText(MainActivity.this, "Usuario verificado: " + userId, Toast.LENGTH_SHORT).show();
+                        tvStatus.setText(String.format("✅ Verificado: %s (Score: %d, Tiempo: %.2f ms)",
+                                userId, score, elapsedMicros / 1000.0));
                     } else {
-                        tvStatus.setText("❌ Huella no reconocida");
-                        Toast.makeText(MainActivity.this, "Huella no reconocida", Toast.LENGTH_SHORT).show();
+                        tvStatus.setText(String.format("❌ No reconocido (Tiempo: %.2f ms)", 
+                                elapsedMicros / 1000.0));
                     }
-                    btnRegister.setEnabled(true);
-                    btnVerify.setEnabled(true);
                 });
             }
             
@@ -135,21 +146,33 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String error) {
                 runOnUiThread(() -> {
                     Toast.makeText(MainActivity.this, "Error: " + error, Toast.LENGTH_SHORT).show();
-                    tvStatus.setText("Error en verificación");
-                    btnRegister.setEnabled(true);
-                    btnVerify.setEnabled(true);
+                    tvStatus.setText("Error: " + error);
                 });
             }
         });
+    }
+    
+    private void clearDatabase() {
+        new MaterialAlertDialogBuilder(this)
+            .setTitle("Confirmar")
+            .setMessage("¿Eliminar todas las huellas?")
+            .setPositiveButton("Sí", (d, w) -> {
+                fingerprintService.clearAllFingerprints();
+                tvStatus.setText("Base de datos limpiada");
+                tvCount.setText("Huellas en caché: 0");
+            })
+            .setNegativeButton("No", null)
+            .show();
     }
     
     private void showInfoDialog() {
         int count = fingerprintService.getFingerprintCount();
         new MaterialAlertDialogBuilder(this)
             .setTitle("Información")
-            .setMessage("Huellas registradas en caché: " + count + 
-                       "\n\nLas huellas se guardan persistentemente en la base de datos local.\n" +
-                       "Al reiniciar la app, se cargan automáticamente a la caché del SDK.")
+            .setMessage("Huellas registradas: " + count + 
+                       "\n\nVID: 6997, PID: 292\n" +
+                       "Umbral de coincidencia: 55\n\n" +
+                       "Las huellas se guardan persistentemente en Room Database")
             .setPositiveButton("OK", null)
             .show();
     }
