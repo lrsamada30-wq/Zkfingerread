@@ -6,8 +6,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
-import android.os.Build;
-import android.os.PendingIntent;
 import android.util.Log;
 import com.zkteco.android.biometric.core.device.ParameterHelper;
 import com.zkteco.android.biometric.core.device.TransportType;
@@ -25,38 +23,19 @@ public class FingerprintService {
     private static final int PID = 292;
     private static final int MATCH_THRESHOLD = 55;
     private static final int TEMPLATE_SIZE = 2048;
-    private static final String ACTION_USB_PERMISSION = "com.example.zkfingerapp.USB_PERMISSION";
     
     private FingerprintSensor fingerprintSensor;
     private Context context;
     private AppDatabase database;
     private boolean isCapturing = false;
     private boolean isRegister = false;
-    private int uid = 1;
     private byte[][] regTempArray = new byte[3][TEMPLATE_SIZE];
     private int enrollIdx = 0;
-    
-    private FingerprintCaptureListener currentListener;
-    
-    private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (ACTION_USB_PERMISSION.equals(action)) {
-                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    Log.d(TAG, "USB Permission granted");
-                } else {
-                    Log.e(TAG, "USB Permission denied");
-                }
-            }
-        }
-    };
     
     public FingerprintService(Context context) {
         this.context = context;
         this.database = AppDatabase.getInstance(context);
         initSensor();
-        requestUsbPermission();
     }
     
     private void initSensor() {
@@ -70,34 +49,6 @@ public class FingerprintService {
             Log.d(TAG, "Sensor inicializado correctamente");
         } catch (Exception e) {
             Log.e(TAG, "Error inicializando sensor: " + e.getMessage());
-        }
-    }
-    
-    private void requestUsbPermission() {
-        UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
-        
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(ACTION_USB_PERMISSION);
-        filter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
-        context.registerReceiver(mUsbReceiver, filter);
-        
-        for (UsbDevice device : usbManager.getDeviceList().values()) {
-            if (device.getVendorId() == VID && device.getProductId() == PID) {
-                if (!usbManager.hasPermission(device)) {
-                    Intent intent = new Intent(ACTION_USB_PERMISSION);
-                    PendingIntent pendingIntent;
-                    
-                    // Compatibilidad con diferentes versiones de Android
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 
-                            PendingIntent.FLAG_IMMUTABLE);
-                    } else {
-                        pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 0);
-                    }
-                    
-                    usbManager.requestPermission(device, pendingIntent);
-                }
-            }
         }
     }
     
@@ -188,7 +139,7 @@ public class FingerprintService {
         isRegister = true;
         enrollIdx = 0;
         
-        currentListener = new FingerprintCaptureListener() {
+        FingerprintCaptureListener listener = new FingerprintCaptureListener() {
             @Override
             public void captureOK(byte[] fpImage) {}
             
@@ -242,7 +193,7 @@ public class FingerprintService {
             }
         };
         
-        fingerprintSensor.setFingerprintCaptureListener(0, currentListener);
+        fingerprintSensor.setFingerprintCaptureListener(0, listener);
         callback.onProgress(3);
     }
     
@@ -254,7 +205,7 @@ public class FingerprintService {
         
         isRegister = false;
         
-        currentListener = new FingerprintCaptureListener() {
+        FingerprintCaptureListener listener = new FingerprintCaptureListener() {
             @Override
             public void captureOK(byte[] fpImage) {}
             
@@ -287,7 +238,7 @@ public class FingerprintService {
             }
         };
         
-        fingerprintSensor.setFingerprintCaptureListener(0, currentListener);
+        fingerprintSensor.setFingerprintCaptureListener(0, listener);
     }
     
     private void saveFingerprintToDatabase(String userId, byte[] template) {
@@ -323,11 +274,6 @@ public class FingerprintService {
     public void destroy() {
         stopCapture();
         closeSensor();
-        try {
-            context.unregisterReceiver(mUsbReceiver);
-        } catch (Exception e) {
-            // Receiver might not be registered
-        }
     }
     
     public interface RegisterCallback {
