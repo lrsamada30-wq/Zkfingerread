@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace 'com.eandroid {
+    namespace 'com.eandroid' {
     namespace 'com.example.zkfingerapp'
     compileSdk 33
 
