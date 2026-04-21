@@ -1,9 +1,16 @@
 package com.example.zkfingerapp;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
+import android.os.PendingIntent;
 import android.util.Log;
 import com.zkteco.android.biometric.core.device.ParameterHelper;
 import com.zkteco.android.biometric.core.device.TransportType;
+import com.zkteco.android.biometric.core.utils.LogHelper;
+import com.zkteco.android.biometric.core.utils.ToolUtils;
 import com.zkteco.android.biometric.module.fingerprintreader.*;
 import com.zkteco.android.biometric.module.fingerprintreader.exception.FingerprintException;
 import java.util.HashMap;
@@ -13,249 +20,92 @@ import com.example.zkfingerapp.db.*;
 
 public class FingerprintService {
     private static final String TAG = "FingerprintService";
+    private static final int VID = 6997;
+    private static final int PID = 292;  // Según tu ejemplo es 292
     private static final int MATCH_THRESHOLD = 55;
     private static final int TEMPLATE_SIZE = 2048;
     
     private FingerprintSensor fingerprintSensor;
     private Context context;
     private AppDatabase database;
-    private Map<String, FingerprintCaptureListener> listeners;
     private boolean isCapturing = false;
+    private boolean isRegister = false;
+    private int uid = 1;
+    private byte[][] regTempArray = new byte[3][TEMPLATE_SIZE];
+    private int enrollIdx = 0;
+    
+    private FingerprintCaptureListener currentListener;
     
     public FingerprintService(Context context) {
         this.context = context;
         this.database = AppDatabase.getInstance(context);
-        this.listeners = new HashMap<>();
         initSensor();
+        requestUsbPermission();
     }
     
     private void initSensor() {
         try {
-            ParameterHelper parameterHelper = new ParameterHelper();
-            parameterHelper.putInt(ParameterHelper.KEY_VID, 6997);
-            parameterHelper.putInt(ParameterHelper.KEY_PID, 288);
-            
-            fingerprintSensor = FingerprintFactory.createFingerprintSensor(
-                context, TransportType.USB, parameterHelper);
-            
+            LogHelper.setLevel(Log.VERBOSE);
+            Map<String, Object> fingerprintParams = new HashMap<>();
+            fingerprintParams.put(ParameterHelper.PARAM_KEY_VID, VID);
+            fingerprintParams.put(ParameterHelper.PARAM_KEY_PID, PID);
+            fingerprintSensor = FingprintFactory.createFingerprintSensor(
+                context, TransportType.USB, fingerprintParams);
             Log.d(TAG, "Sensor inicializado correctamente");
         } catch (Exception e) {
             Log.e(TAG, "Error inicializando sensor: " + e.getMessage());
         }
     }
     
-    // Cargar todas las huellas de la BD a la caché del SDK
-    public void loadAllFingerprintsToCache() {
-        new Thread(() -> {
-            try {
-                // Limpiar caché actual
-                ZKFingerService.clear();
-                
-                List<FingerprintEntity> fingerprints = database.fingerprintDao().getAll();
-                Log.d(TAG, "Cargando " + fingerprints.size() + " huellas a la caché");
-                
-                for (FingerprintEntity fp : fingerprints) {
-                    int result = ZKFingerService.save(fp.getTemplateData(), fp.getUserId());
-                    if (result == 0) {
-                        Log.d(TAG, "Huella cargada: " + fp.getUserId());
-                    } else {
-                        Log.e(TAG, "Error cargando huella " + fp.getUserId() + ": " + result);
-                    }
-                }
-                
-                int count = ZKFingerService.count();
-                Log.d(TAG, "Total huellas en caché: " + count);
-                
-            } catch (Exception e) {
-                Log.e(TAG, "Error cargando huellas: " + e.getMessage());
-            }
-        }).start();
-    }
-    
-    // Registrar nueva huella
-    public void registerFingerprint(String userId, final RegisterCallback callback) {
-        if (isCapturing) {
-            callback.onError("Ya está capturando una huella");
-            return;
-        }
+    private void requestUsbPermission() {
+        UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        String ACTION_USB_PERMISSION = "com.example.zkfingerapp.USB_PERMISSION";
         
-        final byte[][] templates = new byte[3][TEMPLATE_SIZE];
-        final int[] enrollIdx = {0};
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ACTION_USB_PERMISSION);
+        filter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
+        context.registerReceiver(mUsbReceiver, filter);
         
-        FingerprintCaptureListener listener = new FingerprintCaptureListener() {
-            @Override
-            public void captureOK(byte[] fpImage) {
-                // Imagen capturada correctamente
-            }
-            
-            @Override
-            public void captureError(FingerprintException e) {
-                isCapturing = false;
-                stopCapture();
-                callback.onError("Error captura: " + e.getMessage());
-            }
-            
-            @Override
-            public void extractOK(byte[] fpTemplate) {
-                try {
-                    // Verificar si la huella ya existe
-                    byte[] bufids = new byte[256];
-                    int ret = ZKFingerService.identify(fpTemplate, bufids, MATCH_THRESHOLD, 1);
-                    if (ret > 0) {
-                        String result = new String(bufids);
-                        String[] parts = result.split("\t");
-                        isCapturing = false;
-                        stopCapture();
-                        callback.onError("Esta huella ya está registrada con ID: " + parts[0]);
-                        return;
-                    }
-                    
-                    // Verificar consistencia con huellas anteriores
-                    if (enrollIdx[0] > 0) {
-                        int score = ZKFingerService.verify(templates[enrollIdx[0] - 1], fpTemplate);
-                        if (score <= 0) {
-                            callback.onError("Por favor presione el mismo dedo 3 veces");
-                            return;
-                        }
-                    }
-                    
-                    System.arraycopy(fpTemplate, 0, templates[enrollIdx[0]], 0, fpTemplate.length);
-                    enrollIdx[0]++;
-                    
-                    if (enrollIdx[0] == 3) {
-                        // Fusionar las 3 huellas
-                        byte[] finalTemplate = new byte[TEMPLATE_SIZE];
-                        int retMerge = ZKFingerService.merge(templates[0], templates[1], 
-                                                              templates[2], finalTemplate);
-                        
-                        if (retMerge > 0) {
-                            // Guardar en BD y caché
-                            saveFingerprintToDatabase(userId, finalTemplate);
-                            callback.onSuccess();
-                        } else {
-                            callback.onError("Error al fusionar huellas");
-                        }
-                        isCapturing = false;
-                        stopCapture();
-                    } else {
-                        callback.onProgress(3 - enrollIdx[0]);
-                    }
-                    
-                } catch (Exception e) {
-                    isCapturing = false;
-                    stopCapture();
-                    callback.onError("Error: " + e.getMessage());
+        for (UsbDevice device : usbManager.getDeviceList().values()) {
+            if (device.getVendorId() == VID && device.getProductId() == PID) {
+                if (!usbManager.hasPermission(device)) {
+                    Intent intent = new Intent(ACTION_USB_PERMISSION);
+                    PendingIntent pendingIntent = PendingIntent.getBroadcast(context, 0, intent, 
+                        PendingIntent.FLAG_IMMUTABLE);
+                    usbManager.requestPermission(device, pendingIntent);
                 }
             }
-            
-            @Override
-            public void extractError(int errno) {
-                isCapturing = false;
-                stopCapture();
-                callback.onError("Error extrayendo template: " + errno);
-            }
-        };
-        
-        try {
-            fingerprintSensor.setFingerprintCaptureListener(0, listener);
-            fingerprintSensor.startCapture(0);
-            isCapturing = true;
-            callback.onProgress(3);
-        } catch (Exception e) {
-            callback.onError("Error iniciando captura: " + e.getMessage());
         }
     }
     
-    // Verificar identidad
-    public void verifyFingerprint(final VerifyCallback callback) {
-        if (isCapturing) {
-            callback.onError("Ya está capturando una huella");
-            return;
-        }
-        
-        FingerprintCaptureListener listener = new FingerprintCaptureListener() {
-            @Override
-            public void captureOK(byte[] fpImage) {}
-            
-            @Override
-            public void captureError(FingerprintException e) {
-                isCapturing = false;
-                stopCapture();
-                callback.onError("Error captura: " + e.getMessage());
-            }
-            
-            @Override
-            public void extractOK(byte[] fpTemplate) {
-                try {
-                    byte[] bufids = new byte[256];
-                    int ret = ZKFingerService.identify(fpTemplate, bufids, MATCH_THRESHOLD, 1);
-                    
-                    if (ret > 0) {
-                        String result = new String(bufids);
-                        String[] parts = result.split("\t");
-                        String userId = parts[0];
-                        int score = Integer.parseInt(parts[1]);
-                        callback.onVerified(true, userId, score);
-                    } else {
-                        callback.onVerified(false, null, 0);
-                    }
-                    
-                } catch (Exception e) {
-                    callback.onError("Error verificando: " + e.getMessage());
-                } finally {
-                    isCapturing = false;
-                    stopCapture();
+    private final android.content.BroadcastReceiver mUsbReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if ("com.example.zkfingerapp.USB_PERMISSION".equals(action)) {
+                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                    Log.d(TAG, "USB Permission granted");
+                } else {
+                    Log.e(TAG, "USB Permission denied");
                 }
             }
-            
-            @Override
-            public void extractError(int errno) {
-                isCapturing = false;
-                stopCapture();
-                callback.onError("Error extrayendo template: " + errno);
-            }
-        };
-        
-        try {
-            fingerprintSensor.setFingerprintCaptureListener(0, listener);
-            fingerprintSensor.startCapture(0);
-            isCapturing = true;
-        } catch (Exception e) {
-            callback.onError("Error iniciando captura: " + e.getMessage());
         }
-    }
+    };
     
-    private void saveFingerprintToDatabase(String userId, byte[] template) {
-        new Thread(() -> {
-            FingerprintEntity entity = new FingerprintEntity(userId, template, System.currentTimeMillis());
-            long id = database.fingerprintDao().insert(entity);
-            if (id > 0) {
-                ZKFingerService.save(template, userId);
-                Log.d(TAG, "Huella guardada exitosamente: " + userId);
-            }
-        }).start();
-    }
-    
-    private void stopCapture() {
-        try {
-            if (fingerprintSensor != null) {
-                fingerprintSensor.stopCapture(0);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error deteniendo captura: " + e.getMessage());
-        }
-    }
-    
-    public void openSensor() {
+    // Abrir el sensor
+    public boolean openSensor() {
         try {
             if (fingerprintSensor != null) {
                 fingerprintSensor.open(0);
+                return true;
             }
         } catch (Exception e) {
             Log.e(TAG, "Error abriendo sensor: " + e.getMessage());
         }
+        return false;
     }
     
+    // Cerrar el sensor
     public void closeSensor() {
         try {
             if (fingerprintSensor != null) {
@@ -266,15 +116,204 @@ public class FingerprintService {
         }
     }
     
-    public void destroy() {
-        closeSensor();
-        if (fingerprintSensor != null) {
-            FingerprintSensor.destroy(fingerprintSensor);
+    // Iniciar captura
+    public boolean startCapture() {
+        try {
+            if (fingerprintSensor != null && !isCapturing) {
+                fingerprintSensor.startCapture(0);
+                isCapturing = true;
+                return true;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting capture: " + e.getMessage());
+        }
+        return false;
+    }
+    
+    // Detener captura
+    public void stopCapture() {
+        try {
+            if (fingerprintSensor != null && isCapturing) {
+                fingerprintSensor.stopCapture(0);
+                isCapturing = false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping capture: " + e.getMessage());
         }
     }
     
+    // Cargar todas las huellas de la BD a la caché del SDK
+    public void loadAllFingerprintsToCache(final LoadCallback callback) {
+        new Thread(() -> {
+            try {
+                ZKFingerService.clear();
+                
+                List<FingerprintEntity> fingerprints = database.fingerprintDao().getAll();
+                Log.d(TAG, "Cargando " + fingerprints.size() + " huellas a la caché");
+                
+                int successCount = 0;
+                for (FingerprintEntity fp : fingerprints) {
+                    int result = ZKFingerService.save(fp.getTemplateData(), fp.getUserId());
+                    if (result == 0) {
+                        successCount++;
+                    }
+                }
+                
+                final int count = ZKFingerService.count();
+                if (callback != null) {
+                    ((android.app.Activity) context).runOnUiThread(() -> 
+                        callback.onLoaded(successCount, count));
+                }
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error cargando huellas: " + e.getMessage());
+                if (callback != null) {
+                    ((android.app.Activity) context).runOnUiThread(() -> 
+                        callback.onError(e.getMessage()));
+                }
+            }
+        }).start();
+    }
+    
+    // Registrar nueva huella
+    public void registerFingerprint(final RegisterCallback callback) {
+        if (!isCapturing) {
+            callback.onError("Inicie la captura primero");
+            return;
+        }
+        
+        isRegister = true;
+        enrollIdx = 0;
+        
+        // Crear listener para registro
+        currentListener = new FingerprintCaptureListener() {
+            @Override
+            public void captureOK(byte[] fpImage) {
+                // Imagen capturada - opcionalmente mostrar
+            }
+            
+            @Override
+            public void captureError(FingerprintException e) {
+                callback.onError("Error captura: " + e.getMessage());
+            }
+            
+            @Override
+            public void extractError(int errno) {
+                callback.onError("Error extrayendo template: " + errno);
+            }
+            
+            @Override
+            public void extractOK(byte[] fpTemplate) {
+                // Verificar si ya existe
+                byte[] bufids = new byte[256];
+                int ret = ZKFingerService.identify(fpTemplate, bufids, MATCH_THRESHOLD, 1);
+                if (ret > 0) {
+                    String result = new String(bufids);
+                    String[] parts = result.split("\t");
+                    callback.onError("Huella ya registrada por: " + parts[0]);
+                    isRegister = false;
+                    enrollIdx = 0;
+                    return;
+                }
+                
+                // Verificar consistencia
+                if (enrollIdx > 0 && ZKFingerService.verify(regTempArray[enrollIdx - 1], fpTemplate) <= 0) {
+                    callback.onError("Por favor presione el mismo dedo 3 veces");
+                    return;
+                }
+                
+                System.arraycopy(fpTemplate, 0, regTempArray[enrollIdx], 0, TEMPLATE_SIZE);
+                enrollIdx++;
+                
+                if (enrollIdx == 3) {
+                    byte[] finalTemplate = new byte[TEMPLATE_SIZE];
+                    int retMerge = ZKFingerService.merge(regTempArray[0], regTempArray[1], 
+                                                          regTempArray[2], finalTemplate);
+                    if (retMerge > 0) {
+                        String userId = "user_" + System.currentTimeMillis();
+                        saveFingerprintToDatabase(userId, finalTemplate);
+                        callback.onSuccess(userId);
+                    } else {
+                        callback.onError("Error al fusionar huellas: " + retMerge);
+                    }
+                    isRegister = false;
+                    enrollIdx = 0;
+                } else {
+                    callback.onProgress(3 - enrollIdx);
+                }
+            }
+        };
+        
+        fingerprintSensor.setFingerprintCaptureListener(0, currentListener);
+        callback.onProgress(3);
+    }
+    
+    // Verificar identidad
+    public void verifyFingerprint(final VerifyCallback callback) {
+        if (!isCapturing) {
+            callback.onError("Inicie la captura primero");
+            return;
+        }
+        
+        isRegister = false;
+        
+        currentListener = new FingerprintCaptureListener() {
+            @Override
+            public void captureOK(byte[] fpImage) {}
+            
+            @Override
+            public void captureError(FingerprintException e) {
+                callback.onError("Error captura: " + e.getMessage());
+            }
+            
+            @Override
+            public void extractError(int errno) {
+                callback.onError("Error extrayendo template: " + errno);
+            }
+            
+            @Override
+            public void extractOK(byte[] fpTemplate) {
+                byte[] bufids = new byte[256];
+                long startTime = System.nanoTime();
+                int ret = ZKFingerService.identify(fpTemplate, bufids, MATCH_THRESHOLD, 1);
+                long elapsedMicros = (System.nanoTime() - startTime) / 1000;
+                
+                if (ret > 0) {
+                    String result = new String(bufids);
+                    String[] parts = result.split("\t");
+                    String userId = parts[0];
+                    int score = Integer.parseInt(parts[1]);
+                    callback.onVerified(true, userId, score, elapsedMicros);
+                } else {
+                    callback.onVerified(false, null, 0, elapsedMicros);
+                }
+            }
+        };
+        
+        fingerprintSensor.setFingerprintCaptureListener(0, currentListener);
+    }
+    
+    private void saveFingerprintToDatabase(String userId, byte[] template) {
+        new Thread(() -> {
+            try {
+                FingerprintEntity entity = new FingerprintEntity(userId, template, System.currentTimeMillis());
+                long id = database.fingerprintDao().insert(entity);
+                if (id > 0) {
+                    ZKFingerService.save(template, userId);
+                    Log.d(TAG, "Huella guardada: " + userId);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error guardando: " + e.getMessage());
+            }
+        }).start();
+    }
+    
     public int getFingerprintCount() {
-        return ZKFingerService.count();
+        try {
+            return ZKFingerService.count();
+        } catch (Exception e) {
+            return 0;
+        }
     }
     
     public void clearAllFingerprints() {
@@ -284,14 +323,24 @@ public class FingerprintService {
         }).start();
     }
     
+    public void destroy() {
+        stopCapture();
+        closeSensor();
+    }
+    
     public interface RegisterCallback {
         void onProgress(int remaining);
-        void onSuccess();
+        void onSuccess(String userId);
         void onError(String error);
     }
     
     public interface VerifyCallback {
-        void onVerified(boolean success, String userId, int score);
+        void onVerified(boolean success, String userId, int score, long elapsedMicros);
+        void onError(String error);
+    }
+    
+    public interface LoadCallback {
+        void onLoaded(int loaded, int total);
         void onError(String error);
     }
 }
