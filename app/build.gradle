@@ -28,6 +28,17 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+    
+    // Para empaquetar las librerías nativas
+    packagingOptions {
+        pickFirst 'lib/armeabi-v7a/libzkfinger10.so'
+        pickFirst 'lib/arm64-v8a/libzkfinger10.so'
+    }
 }
 
 dependencies {
