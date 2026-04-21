@@ -26,58 +26,84 @@
         android:padding="16dp"
         android:layout_marginTop="?attr/actionBarSize">
 
+        <ImageView
+            android:id="@+id/imageView"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:background="#333"
+            android:scaleType="centerInside"
+            android:layout_marginBottom="16dp"/>
+
         <TextView
             android:id="@+id/tvCount"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Huellas en caché: 0"
             android:textSize="14sp"
-            android:layout_marginBottom="16dp"/>
+            android:layout_marginBottom="8dp"/>
 
-        <com.google.android.material.textfield.TextInputLayout
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="ID de Usuario">
+            android:orientation="horizontal">
 
-            <EditText
-                android:id="@+id/etUserId"
-                android:layout_width="match_parent"
+            <Button
+                android:id="@+id/btnStart"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:inputType="text" />
+                android:layout_weight="1"
+                android:text="Iniciar"
+                android:layout_marginEnd="8dp"/>
 
-        </com.google.android.material.textfield.TextInputLayout>
+            <Button
+                android:id="@+id/btnStop"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Detener"
+                android:enabled="false"/>
+        </LinearLayout>
 
-        <Button
-            android:id="@+id/btnRegister"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Registrar Huella"
-            android:layout_marginTop="16dp" />
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/btnRegister"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Registrar"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/btnVerify"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Verificar"/>
+        </LinearLayout>
 
         <Button
-            android:id="@+id/btnVerify"
+            android:id="@+id/btnClear"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Verificar Huella"
-            android:layout_marginTop="8dp" />
-
-        <Button
-            android:id="@+id/btnLoadCache"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Recargar Caché desde BD"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="8dp"
+            android:text="Limpiar BD"
+            android:backgroundTint="#D32F2F"/>
 
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Listo para usar"
+            android:text="Inicie el sensor"
             android:gravity="center"
-            android:textSize="16sp"
-            android:layout_marginTop="32dp"
-            android:padding="16dp"
-            android:background="@android:drawable/editbox_background" />
+            android:textSize="14sp"
+            android:layout_marginTop="16dp"
+            android:padding="12dp"
+            android:background="@android:drawable/editbox_background"/>
 
     </LinearLayout>
 
