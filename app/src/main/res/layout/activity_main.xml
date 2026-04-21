@@ -52,24 +52,21 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Registrar Huella"
-            android:layout_marginTop="16dp"
-            style="@style/Widget.Material3.Button" />
+            android:layout_marginTop="16dp" />
 
         <Button
             android:id="@+id/btnVerify"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Verificar Huella"
-            android:layout_marginTop="8dp"
-            style="@style/Widget.Material3.Button.Outlined" />
+            android:layout_marginTop="8dp" />
 
         <Button
             android:id="@+id/btnLoadCache"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Recargar Caché desde BD"
-            android:layout_marginTop="8dp"
-            style="@style/Widget.Material3.Button.TextButton" />
+            android:layout_marginTop="8dp" />
 
         <TextView
             android:id="@+id/tvStatus"
